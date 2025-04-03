@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Logger Test Page</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+
+            .controls {
+                background: #f5f5f5;
+                padding: 15px;
+                border-radius: 6px;
+                margin-bottom: 20px;
+            }
+
+            button {
+                padding: 8px 12px;
+                margin-right: 10px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+
+            /* Define styles for different log levels */
+            .primary {
+                background: #2196F3;
+                color: white;
+            }
+
+            .secondary {
+                background: #9E9E9E;
+                color: white;
+            }
+
+            .error {
+                background: #FF5252;
+                color: white;
+            }
+
+            .warning {
+                background: #FFC107;
+                color: white;
+            }
+
+            .info {
+                background: #03A9F4;
+                color: white;
+            }
+
+            .debug {
+                background: #8BC34A;
+                color: white;
+            }
+
+            h3 {
+                margin-top: 25px;
+            }
+
+            pre {
+                background: #f0f0f0;
+                padding: 10px;
+                overflow: auto;
+                border-radius: 4px;
+            }
+
+            .config-box {
+                border: 1px solid #ddd;
+                padding: 15px;
+                margin: 15px 0;
+                border-radius: 4px;
+            }
+
+            #log-display {
+                border: 1px solid #ddd;
+                padding: 10px;
+                height: 200px;
+                overflow-y: auto;
+                margin-top: 20px;
+                font-family: monospace;
+                background: #f9f9f9;
+            }
+
+            .log-entry {
+                border-bottom: 1px solid #eee;
+                padding: 5px 0;
+            }
+
+            .log-entry.error {
+                background: inherit;
+                color: #FF5252;
+            }
+
+            .log-entry.warn {
+                color: #FFA000;
+            }
+
+            .log-entry.info {
+                background: inherit;
+                color: #2196F3;
+            }
+
+            .log-entry.debug {
+                color: #8BC34A;
+            }
+
+            .log-entry.trace {
+                color: #9E9E9E;
+            }
+        </style>
+    </head>
+
+    <body>
+        <h1>Logger Test Page</h1>
+        <p>Use the controls below to test different logger configurations and see how they affect console output.</p>
+        <div class="controls">
+            <h3>Logger Configuration</h3>
+            <div>
+                <button id="enable-all" class="primary">Enable All Logging</button>
+                <button id="disable-errors" class="error">Disable Error Messages</button>
+                <button id="info-only" class="info">Info Only Mode</button>
+                <button id="reset-config" class="secondary">Reset to Default</button>
+            </div>
+            <h3>Test Log Messages</h3>
+            <div>
+                <button id="test-error" class="error">Test Error</button>
+                <button id="test-warn" class="warning">Test Warning</button>
+                <button id="test-info" class="info">Test Info</button>
+                <button id="test-debug" class="debug">Test Debug</button>
+                <button id="test-all" class="primary">Test All Types</button>
+            </div>
+            <h3>Special Tests</h3>
+            <div>
+                <button id="test-404" class="error">Simulate 404 Error</button>
+                <button id="test-third-party" class="error">Simulate Third-Party Error</button>
+            </div>
+        </div>
+        <h3>Current Logger Configuration</h3>
+        <pre id="current-config"></pre>
+        <h3>Log Display (Most Recent)</h3>
+        <div id="log-display"></div>
+        <script>
+            // Store original console methods
+            const originalMethods = {
+                log: console.log,
+                info: console.info,
+                warn: console.warn,
+                error: console.error,
+                debug: console.debug,
+                trace: console.trace
+            };
+
+            // Define log levels with numeric priority
+            const LogLevel = {
+                NONE: 0,     // No logging
+                ERROR: 1,    // Only errors
+                WARN: 2,     // Errors and warnings
+                INFO: 3,     // Errors, warnings, and info
+                DEBUG: 4,    // All except trace
+                TRACE: 5,    // Everything
+                ALL: 6       // Absolutely everything
+            };
+
+            class Logger {
+                constructor (options = {}) {
+                    // Default configuration
+                    this.config = {
+                        enabled: true,
+                        level: LogLevel.INFO,
+                        showTimestamps: true,
+                        consoleMethodsToOverride: ['log', 'info', 'warn', 'error', 'debug'],
+                        moduleNameMaxLength: 20,
+                        logToConsole: true,
+                        useColors: true,
+                        styles: {
+                            error: 'color: #FF5252; font-weight: bold',
+                            warn: 'color: #FFC107; font-weight: bold',
+                            info: 'color: #2196F3',
+                            debug: 'color: #8BC34A',
+                            trace: 'color: #9E9E9E',
+                            timestamp: 'color: #607D8B; font-style: italic',
+                            module: 'color: #3F51B5; font-weight: bold',
+                        },
+                        filters: [
+                            // By default, no filters
+                        ]
+                    };
+
+                    // Apply provided options
+                    this.configure(options);
+
+                    // Storage for captured logs
+                    this.logHistory = [];
+
+                    // Bind methods to maintain context
+                    this.log = this.log.bind(this);
+                    this.info = this.info.bind(this);
+                    this.warn = this.warn.bind(this);
+                    this.error = this.error.bind(this);
+                    this.debug = this.debug.bind(this);
+                    this.trace = this.trace.bind(this);
+
+                    // Initialize
+                    this.applyOverrides();
+                }
+
+                // Configure logger settings
+                configure (options) {
+                    if (!options) return;
+
+                    // Merge options
+                    for (const [key, value] of Object.entries(options)) {
+                        if (key === 'filters' && Array.isArray(value)) {
+                            this.config.filters = [...value];
+                        } else if (key === 'styles' && value) {
+                            this.config.styles = { ...this.config.styles, ...value };
+                        } else if (typeof value !== 'undefined') {
+                            this.config[key] = value;
+                        }
+                    }
+
+                    return this;
+                }
+
+                // Get current configuration (for display purposes)
+                getConfigSummary () {
+                    return {
+                        enabled: this.config.enabled,
+                        level: Object.keys(LogLevel).find(key => LogLevel[key] === this.config.level) || 'UNKNOWN',
+                        filters: this.config.filters.map(f => ({
+                            pattern: f.pattern instanceof RegExp ? f.pattern.toString() : f.pattern,
+                            level: f.level,
+                            suppress: f.suppress
+                        })),
+                        overriddenMethods: this.config.consoleMethodsToOverride
+                    };
+                }
+
+                // Apply console overrides
+                applyOverrides () {
+                    // Override specified console methods
+                    for (const method of this.config.consoleMethodsToOverride) {
+                        if (console[method] && originalMethods[method]) {
+                            // Create the override
+                            console[method] = (...args) => {
+                                this[method](...args);
+                            };
+                        }
+                    }
+
+                    return this;
+                }
+
+                // Restore original console methods
+                restoreConsole () {
+                    for (const [method, original] of Object.entries(originalMethods)) {
+                        console[method] = original;
+                    }
+                    return this;
+                }
+
+                // Main logging method (others call this)
+                log (level, ...args) {
+                    if (!this.config.enabled) return;
+
+                    // Default to INFO level if not specified
+                    const logLevel = typeof level === 'string' ? level : 'info';
+                    const logLevelValue = LogLevel[logLevel.toUpperCase()] || LogLevel.INFO;
+
+                    // Check if we should log based on minimum level
+                    if (logLevelValue > this.config.level) return;
+
+                    // Get call information for context
+                    const callInfo = this.getCallInfo();
+
+                    // Check message against filters
+                    const message = args.length > 0 ? String(args[0]) : '';
+                    if (!this.shouldLog(logLevel, message, callInfo)) return;
+
+                    // Prepare log entry with metadata
+                    const timestamp = this.config.showTimestamps ? new Date() : null;
+                    const logEntry = {
+                        level: logLevel,
+                        timestamp,
+                        message: args,
+                        source: callInfo,
+                    };
+
+                    // Add to history for our UI
+                    this.logHistory.push(logEntry);
+                    if (this.logHistory.length > 100) {
+                        this.logHistory.shift(); // Keep history manageable
+                    }
+
+                    // Update display if available
+                    this.updateDisplay(logEntry);
+
+                    // Output to console if enabled
+                    if (this.config.logToConsole) {
+                        this.outputToConsole(logLevel, timestamp, callInfo, ...args);
+                    }
+
+                    return this;
+                }
+
+                // Helper method to update the log display in our test UI
+                updateDisplay (logEntry) {
+                    const display = document.getElementById('log-display');
+                    if (!display) return;
+
+                    const entry = document.createElement('div');
+                    entry.className = `log-entry ${logEntry.level}`;
+
+                    // Format entry
+                    const time = logEntry.timestamp ? `[${logEntry.timestamp.toLocaleTimeString()}] ` : '';
+                    const level = `[${logEntry.level.toUpperCase()}] `;
+                    const message = logEntry.message.map(m =>
+                        typeof m === 'object' ? JSON.stringify(m) : String(m)
+                    ).join(' ');
+
+                    entry.textContent = `${time}${level}${message}`;
+
+                    // Add to display
+                    display.appendChild(entry);
+                    display.scrollTop = display.scrollHeight;
+                }
+
+                // Helper method to format and output to console
+                outputToConsole (level, timestamp, callInfo, ...args) {
+                    // Get original console method to use
+                    const consoleMethod = originalMethods[level] || originalMethods.log;
+
+                    if (!this.config.useColors) {
+                        // Simple output without colors
+                        const prefix = [
+                            timestamp ? `[${timestamp.toISOString()}]` : '',
+                            `[${level.toUpperCase()}]`,
+                            callInfo.moduleName ? `[${callInfo.moduleName}]` : ''
+                        ].filter(Boolean).join(' ');
+
+                        consoleMethod(prefix, ...args);
+                        return;
+                    }
+
+                    // With colors (using CSS in console)
+                    const styles = this.config.styles;
+                    const parts = [];
+                    const styleArgs = [];
+
+                    // Add timestamp if enabled
+                    if (timestamp) {
+                        parts.push('%c[%s]');
+                        styleArgs.push(styles.timestamp, timestamp.toISOString());
+                    }
+
+                    // Add level and module
+                    parts.push(`%c[${level.toUpperCase()}]`);
+                    styleArgs.push(styles[level] || '');
+
+                    if (callInfo.moduleName) {
+                        parts.push(`%c[${this.formatModuleName(callInfo.moduleName)}]`);
+                        styleArgs.push(styles.module || '');
+                    }
+
+                    // Build full format string
+                    const formatString = parts.join(' ');
+
+                    // Log with formatting
+                    consoleMethod(formatString, ...styleArgs, ...args);
+                }
+
+                // Get information about the caller
+                getCallInfo () {
+                    const stackLines = new Error().stack.split('\n');
+
+                    // Find the first line that's not part of the logger
+                    let callerLine = '';
+                    for (let i = 3; i < stackLines.length; i++) {
+                        if (!stackLines[i].includes('Logger')) {
+                            callerLine = stackLines[i];
+                            break;
+                        }
+                    }
+
+                    // Parse the line to extract information
+                    const fileMatch = callerLine.match(/at\s+(.*)\s+\((.*):(\d+):(\d+)\)/) ||
+                        callerLine.match(/at\s+(.*):(\d+):(\d+)/);
+
+                    if (!fileMatch) {
+                        return { fileName: 'unknown', lineNumber: 0, columnNumber: 0, moduleName: 'unknown' };
+                    }
+
+                    const isSimpleCall = fileMatch.length === 4;
+
+                    if (isSimpleCall) {
+                        // Format: "at filename:line:column"
+                        return {
+                            fileName: fileMatch[1],
+                            lineNumber: parseInt(fileMatch[2], 10),
+                            columnNumber: parseInt(fileMatch[3], 10),
+                            moduleName: this.extractModuleName(fileMatch[1])
+                        };
+                    } else {
+                        // Format: "at functionName (filename:line:column)"
+                        return {
+                            functionName: fileMatch[1],
+                            fileName: fileMatch[2],
+                            lineNumber: parseInt(fileMatch[3], 10),
+                            columnNumber: parseInt(fileMatch[4], 10),
+                            moduleName: this.extractModuleName(fileMatch[2])
+                        };
+                    }
+                }
+
+                // Extract module name from file path
+                extractModuleName (filePath) {
+                    if (!filePath) return 'unknown';
+
+                    // Get filename without extension
+                    const parts = filePath.split('/');
+                    const fileName = parts[parts.length - 1].split('.')[0];
+
+                    return fileName || 'unknown';
+                }
+
+                // Format module name to consistent length
+                formatModuleName (name) {
+                    return name
+                    /** const maxLength = this.config.moduleNameMaxLength;
+                    if (name.length <= maxLength) {
+                        return name.padEnd(maxLength);
+                    }
+                    return name.substring(0, maxLength - 3) + '...'; */
+                }
+
+                // Determine if a message should be logged based on filters
+                shouldLog (level, message, context = {}) {
+                    const levelValue = LogLevel[level.toUpperCase()] || LogLevel.INFO;
+
+                    // Check against filters
+                    for (const filter of this.config.filters) {
+                        // Skip if filter is for a different level
+                        const filterLevel = typeof filter.level === 'string'
+                            ? LogLevel[filter.level.toUpperCase()]
+                            : filter.level;
+
+                        if (filterLevel !== undefined && filterLevel !== levelValue) {
+                            continue;
+                        }
+
+                        // Check pattern match
+                        let patternMatches = false;
+
+                        if (filter.pattern instanceof RegExp) {
+                            patternMatches = filter.pattern.test(message);
+                        } else if (typeof filter.pattern === 'string') {
+                            patternMatches = message.includes(filter.pattern);
+                        } else if (typeof filter.pattern === 'function') {
+                            patternMatches = filter.pattern(message, context);
+                        }
+
+                        if (patternMatches) {
+                            return !filter.suppress;
+                        }
+                    }
+
+                    // If no filters matched, allow the log
+                    return true;
+                }
+
+                // Add a new filter
+                addFilter (pattern, level = 'error', suppress = true) {
+                    this.config.filters.push({
+                        pattern,
+                        level,
+                        suppress
+                    });
+
+                    return this;
+                }
+
+                // Remove a filter by pattern and level
+                removeFilter (pattern, level = 'error') {
+                    const index = this.config.filters.findIndex(f =>
+                        (f.pattern instanceof RegExp && pattern instanceof RegExp)
+                            ? f.pattern.toString() === pattern.toString()
+                            : f.pattern === pattern && f.level === level
+                    );
+
+                    if (index !== -1) {
+                        this.config.filters.splice(index, 1);
+                    }
+
+                    return this;
+                }
+
+                // Public logging methods (wrappers around the main log method)
+                info (...args) {
+                    return this.log('info', ...args);
+                }
+
+                warn (...args) {
+                    return this.log('warn', ...args);
+                }
+
+                error (...args) {
+                    return this.log('error', ...args);
+                }
+
+                debug (...args) {
+                    return this.log('debug', ...args);
+                }
+
+                trace (...args) {
+                    return this.log('trace', ...args);
+                }
+            }
+
+            // Create default instance
+            const logger = new Logger();
+
+            // Update the configuration display
+            function updateConfigDisplay () {
+                const configElement = document.getElementById('current-config');
+                if (configElement) {
+                    configElement.textContent = JSON.stringify(logger.getConfigSummary(), null, 2);
+                }
+            }
+
+            // Test scenarios
+            function runTestScenario (type) {
+                switch (type) {
+                    case 'error':
+                        console.error('This is a test error message');
+                        break;
+                    case 'warn':
+                        console.warn('This is a test warning message');
+                        break;
+                    case 'info':
+                        console.info('This is a test info message');
+                        break;
+                    case 'debug':
+                        console.debug('This is a test debug message');
+                        break;
+                    case 'all':
+                        console.error('Test error message');
+                        console.warn('Test warning message');
+                        console.info('Test info message');
+                        console.debug('Test debug message');
+                        console.log('Test log message');
+                        break;
+                    case '404':
+                        console.error('Failed to load resource: the server responded with a status of 404 (Not Found)');
+                        break;
+                    case 'third-party':
+                        console.error('[third-party-lib.js] Error: Unable to fetch data from endpoint: 404 Not Found');
+                        break;
+                }
+            }
+
+            // Init event listeners
+            document.addEventListener('DOMContentLoaded', () => {
+                // Initial config display
+                updateConfigDisplay();
+
+                // Set up button listeners for configuration
+                document.getElementById('enable-all').addEventListener('click', () => {
+                    logger.configure({
+                        enabled: true,
+                        level: LogLevel.ALL,
+                        filters: [] // Remove all filters
+                    });
+                    updateConfigDisplay();
+                });
+
+                document.getElementById('disable-errors').addEventListener('click', () => {
+                    logger.configure({
+                        filters: [
+                            { pattern: /.+/, level: 'error', suppress: true } // Suppress all errors
+                        ]
+                    });
+                    updateConfigDisplay();
+                });
+
+                document.getElementById('info-only').addEventListener('click', () => {
+                    // First, restore original console methods to avoid issues
+                    logger.restoreConsole();
+
+                    // Configure logger to only show info level
+                    logger.configure({
+                        level: LogLevel.INFO,
+                        consoleMethodsToOverride: ['log', 'info'],
+                        filters: [
+                            { pattern: /.+/, level: 'error', suppress: true },
+                            { pattern: /.+/, level: 'warn', suppress: true },
+                            { pattern: /.+/, level: 'debug', suppress: true }
+                        ]
+                    });
+
+                    // Map console.log to logger.info
+                    console.log = logger.info;
+                    console.info = logger.info;
+
+                    // Keep original methods for others (they won't show due to level setting)
+                    console.error = originalMethods.error;
+                    console.warn = originalMethods.warn;
+                    console.debug = originalMethods.debug;
+
+                    updateConfigDisplay();
+                });
+
+                document.getElementById('reset-config').addEventListener('click', () => {
+                    logger.restoreConsole();
+                    logger.configure({
+                        enabled: true,
+                        level: LogLevel.INFO,
+                        filters: []
+                    });
+                    logger.applyOverrides();
+                    updateConfigDisplay();
+                });
+
+                // Set up test buttons
+                document.getElementById('test-error').addEventListener('click', () => runTestScenario('error'));
+                document.getElementById('test-warn').addEventListener('click', () => runTestScenario('warn'));
+                document.getElementById('test-info').addEventListener('click', () => runTestScenario('info'));
+                document.getElementById('test-debug').addEventListener('click', () => runTestScenario('debug'));
+                document.getElementById('test-all').addEventListener('click', () => runTestScenario('all'));
+                document.getElementById('test-404').addEventListener('click', () => runTestScenario('404'));
+                document.getElementById('test-third-party').addEventListener('click', () => runTestScenario('third-party'));
+            });
+        </script>
+    </body>
+
+</html>
